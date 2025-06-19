@@ -1,0 +1,9 @@
+var job = new PathfindingJob {
+    nodes = nodes,
+    allNeighbors = allNeighbors,
+    startNodeIndex = startIndex,
+    endNodeIndex = endIndex,
+    path = path,
+    foundPath = foundPath
+};
+job.Schedule().Complete();

@@ -1,33 +1,145 @@
-# Gradle files
-.gradle/
-build/
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
 
-# Local configuration file (sdk path, etc)
-local.properties
+/// <summary>
+/// Blittable struct for pathfinding nodes.
+/// neighbors: NativeArray of neighbor indices (set up before scheduling the job).
+/// </summary>
+public struct PathNode
+{
+    public int index;
+    public int x, y;
+    public bool walkable;
+    public int neighborStart; // Start index in the global neighbors array
+    public int neighborCount; // Number of neighbors
 
-# Log/OS Files
-*.log
+    public float CostTo(PathNode other)
+    {
+        // Example: cost is always 1, customize as needed
+        return 1f;
+    }
+}
 
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.apk
-output-metadata.json
+/// <summary>
+/// Burst-compiled A* pathfinding job for hex grids.
+/// </summary>
+[BurstCompile]
+public struct PathfindingJob : IJob
+{
+    [ReadOnly] public NativeArray<PathNode> nodes;
+    [ReadOnly] public NativeArray<int> allNeighbors; // Flattened neighbor indices for all nodes
+    [ReadOnly] public int startNodeIndex;
+    [ReadOnly] public int endNodeIndex;
+    public NativeList<int> path; // Output: indices of nodes in the path
+    public NativeArray<bool> foundPath; // Output: true if path found
 
-# IntelliJ
-*.iml
-.idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
+    public void Execute()
+    {
+        var openSet = new NativeList<int>(Allocator.Temp);
+        var closedSet = new NativeHashSet<int>(nodes.Length, Allocator.Temp);
+        var cameFrom = new NativeArray<int>(nodes.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
 
-# Keystore files
-*.jks
-*.keystore
+        var gScore = new NativeArray<float>(nodes.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
+        var fScore = new NativeArray<float>(nodes.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
 
-# Google Services (e.g. APIs or Firebase)
-google-services.json
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            gScore[i] = float.MaxValue;
+            fScore[i] = float.MaxValue;
+            cameFrom[i] = -1;
+        }
 
-# Android Profiling
-*.hprof
+        gScore[startNodeIndex] = 0;
+        fScore[startNodeIndex] = HeuristicCostEstimate(startNodeIndex, endNodeIndex);
+
+        openSet.Add(startNodeIndex);
+
+        bool pathFound = false;
+
+        while (openSet.Length > 0)
+        {
+            // Find node in openSet with lowest fScore
+            int current = openSet[0];
+            float lowestF = fScore[current];
+            for (int i = 1; i < openSet.Length; i++)
+            {
+                int idx = openSet[i];
+                if (fScore[idx] < lowestF)
+                {
+                    current = idx;
+                    lowestF = fScore[idx];
+                }
+            }
+
+            if (current == endNodeIndex)
+            {
+                ReconstructPath(cameFrom, current, path);
+                pathFound = true;
+                break;
+            }
+
+            openSet.RemoveAt(openSet.IndexOf(current));
+            closedSet.Add(current);
+
+            var node = nodes[current];
+            for (int n = 0; n < node.neighborCount; n++)
+            {
+                int neighborIndex = allNeighbors[node.neighborStart + n];
+                if (neighborIndex < 0 || neighborIndex >= nodes.Length)
+                    continue;
+                if (!nodes[neighborIndex].walkable || closedSet.Contains(neighborIndex))
+                    continue;
+
+                float tentativeG = gScore[current] + node.CostTo(nodes[neighborIndex]);
+                if (!openSet.Contains(neighborIndex))
+                    openSet.Add(neighborIndex);
+                else if (tentativeG >= gScore[neighborIndex])
+                    continue;
+
+                cameFrom[neighborIndex] = current;
+                gScore[neighborIndex] = tentativeG;
+                fScore[neighborIndex] = tentativeG + HeuristicCostEstimate(neighborIndex, endNodeIndex);
+            }
+        }
+
+        foundPath[0] = pathFound;
+
+        openSet.Dispose();
+        closedSet.Dispose();
+        cameFrom.Dispose();
+        gScore.Dispose();
+        fScore.Dispose();
+    }
+
+    /// <summary>
+    /// Hex grid heuristic: cube distance.
+    /// </summary>
+    float HeuristicCostEstimate(int fromIndex, int toIndex)
+    {
+        var from = nodes[fromIndex];
+        var to = nodes[toIndex];
+        int dx = from.x - to.x;
+        int dy = from.y - to.y;
+        int dz = (-from.x - from.y) - (-to.x - to.y);
+        return (math.abs(dx) + math.abs(dy) + math.abs(dz)) / 2f;
+    }
+
+    void ReconstructPath(NativeArray<int> cameFrom, int current, NativeList<int> outPath)
+    {
+        outPath.Clear();
+        while (current != -1)
+        {
+            outPath.Add(current);
+            current = cameFrom[current];
+        }
+        // Reverse path
+        for (int i = 0, j = outPath.Length - 1; i < j; i++, j--)
+        {
+            int temp = outPath[i];
+            outPath[i] = outPath[j];
+            outPath[j] = temp;
+        }
+    }
+}

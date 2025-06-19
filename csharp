@@ -1,5 +1,10 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Linq;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Burst;
+using UnityEngine.Profiling;
 
 [RequireComponent(typeof(Pathfinder))]
 public class HexGrid : MonoBehaviour {
@@ -49,4 +54,149 @@ public class HexGrid : MonoBehaviour {
         }
         return neighbors;
     }
+
+    public IEnumerable<HexTile> AllTiles {
+        get {
+            foreach (var tile in grid)
+                yield return tile;
+        }
+    }
+
+    protected override void Execute(List<GameEntity> entities) {
+        foreach (var attacker in entities) {
+            HexTile targetTile = attacker.position.tile;
+            if (targetTile.currentUnit != null && targetTile.currentUnit.entity != attacker) {
+                var defender = targetTile.currentUnit.entity;
+                CombatResolver.Resolve(attacker, defender);
+            }
+        }
+    }
+
+    public void UpdateTiles() {
+        // Implement tile updating logic here
+    }
+}
+
+public class AIUtilitySystem {
+    public void EvaluateActions(Faction faction, MapSystem mapSystem) {
+        var units = faction.units.ToArray(); // Assuming units is List<Unit>
+        var unitArray = new NativeArray<UnitData>(units.Length, Allocator.TempJob);
+        for (int i = 0; i < units.Length; i++)
+            unitArray[i] = units[i].ToUnitData(); // Convert to blittable struct
+
+        var decisions = new NativeArray<AIDecision>(units.Length, Allocator.TempJob);
+
+        var job = new AIEvaluationJob {
+            units = unitArray,
+            mapData = mapSystem.GetMapData(), // Must be blittable
+            decisions = decisions
+        };
+
+        job.Schedule(units.Length, 8).Complete();
+
+        // Execute best actions (on main thread)
+        var decisionList = decisions.ToArray();
+        foreach (var decision in decisionList.OrderByDescending(d => d.score).Take(5)) {
+            units[decision.unitIndex].ExecuteAction(decision.actionId); // Use index/id, not delegate
+        }
+
+        unitArray.Dispose();
+        decisions.Dispose();
+    }
+}
+
+public struct AIDecision {
+    public int unitIndex;
+    public int actionId;
+    public float score;
+}
+
+[BurstCompile]
+public struct AIEvaluationJob : IJobParallelFor {
+    [ReadOnly] public NativeArray<UnitData> units;
+    [ReadOnly] public MapData mapData;
+    public NativeArray<AIDecision> decisions;
+
+    public void Execute(int index) {
+        var unit = units[index];
+        decisions[index] = new AIDecision {
+            unitIndex = index,
+            actionId = BestActionFor(unit),
+            score = CalculateScore(unit)
+        };
+    }
+
+    float CalculateScore(UnitData unit) {
+        // Implement scoring logic
+        return 0f;
+    }
+
+    int BestActionFor(UnitData unit) {
+        // Implement action selection logic
+        return 0;
+    }
+}
+
+public class PerformanceMonitor : MonoBehaviour {
+    private CustomSampler hexSampler;
+    private CustomSampler aiSampler;
+    public HexGrid hexGrid; // Assign in inspector or via script
+
+    void Start() {
+        hexSampler = CustomSampler.Create("HexGrid_Update");
+        aiSampler = CustomSampler.Create("AI_Update");
+    }
+
+    void Update() {
+        if (hexGrid != null) {
+            hexSampler.Begin();
+            hexGrid.UpdateTiles();
+            hexSampler.End();
+        }
+
+        // Example AI profiling
+        /*
+        aiSampler.Begin();
+        // AI update logic here
+        aiSampler.End();
+        */
+
+        if (Time.frameCount % 10 == 0) {
+            LogMemoryUsage();
+        }
+    }
+
+    void LogMemoryUsage() {
+        Debug.Log($"Total Allocated: {Profiler.GetTotalAllocatedMemoryLong() / 1024 / 1024}MB");
+        Debug.Log($"Total Reserved: {Profiler.GetTotalReservedMemoryLong() / 1024 / 1024}MB");
+    }
+}
+
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+
+[BurstCompile]
+public struct PathfindingJob : IJob {
+    public NativeArray<PathNode> nodes;
+    public int startNodeIndex;
+    public int endNodeIndex;
+    public NativeList<int> path; // Output: indices of nodes in the path
+
+    public void Execute() {
+        // TODO: Implement A* logic here
+        // 1. Initialize open/closed sets
+        // 2. Loop: pick node with lowest cost, expand neighbors
+        // 3. Reconstruct path and write to 'path'
+    }
+}
+
+public struct PathNode {
+    public int index;
+    public int parentIndex;
+    public float gCost;
+    public float hCost;
+    public float fCost;
+    public bool walkable;
+    // Add position or other fields as needed
 }

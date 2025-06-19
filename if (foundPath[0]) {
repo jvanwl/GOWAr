@@ -1,0 +1,3 @@
+if (foundPath[0]) {
+    // path contains the node indices from start to end
+}
