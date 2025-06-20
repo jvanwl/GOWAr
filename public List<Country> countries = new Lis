@@ -1,0 +1,13 @@
+public List<Country> countries = new List<Country>();
+
+void Start() {
+    countries.Add(new Country("Norway", "Nordic"));
+    countries.Add(new Country("Spain", "Latin"));
+    countries.Add(new Country("Japan", "Asian"));
+    // ...otros países...
+
+    // Ejemplo: mostrar banderas en UI
+    foreach (var country in countries) {
+        // Instancia un objeto UI y asigna country.flag como imagen
+    }
+}

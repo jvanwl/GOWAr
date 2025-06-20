@@ -5,14 +5,24 @@ using Unity.Mathematics;
 
 public static class CombatSystem {
     public static void ResolveCombat(Unit attacker, Unit defender) {
+        if (attacker == null || defender == null || defender.currentTile == null) return;
         float terrainBonus = defender.currentTile.defenseBonus * 0.1f;
         float typeAdvantage = GetTypeAdvantage(attacker.type, defender.type);
-        int damage = Mathf.RoundToInt(attacker.attack * typeAdvantage - defender.defense * (1 + terrainBonus));
+        int baseDamage = Mathf.RoundToInt(attacker.attack * typeAdvantage - defender.defense * (1 + terrainBonus));
+        int damage = Mathf.Max(1, baseDamage);
 
-        defender.health -= Mathf.Max(1, damage);
+        // Posibilidad de crítico (ejemplo: 10%)
+        if (UnityEngine.Random.value < 0.1f) {
+            damage = Mathf.RoundToInt(damage * 1.5f);
+            // Aquí puedes disparar un efecto visual de crítico
+        }
+
+        defender.health -= damage;
+        // Aquí puedes disparar un efecto visual de daño
         if (defender.health <= 0) {
             Object.Destroy(defender.gameObject);
             attacker.MoveTo(defender.currentTile);
+            // Aquí puedes disparar un efecto visual de muerte
         }
     }
 
